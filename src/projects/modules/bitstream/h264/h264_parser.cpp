@@ -106,6 +106,72 @@ bool H264Parser::ParseNalUnitHeader(NalUnitBitstreamParser &parser, H264NalUnitH
     return true;
 }
 
+static bool needs_zigzag()
+{
+	return true;
+}
+
+static bool SkipScalingList(NalUnitBitstreamParser &parser, H264SPS &sps, unsigned size)
+{
+	uint8_t list_present = 0;
+	int last = 8;
+	int next = 8;
+
+	if (!parser.ReadBit(list_present))
+	{
+		return false;
+	}
+
+	if (list_present == 0)
+	{
+		// no matrix, don't care
+		return true;
+	}
+
+	for (unsigned ii = 0; ii < size; ++ii)
+	{
+		if (next)
+		{
+			int32_t v = 0;
+			if (!parser.ReadSEV(v))
+			{
+				return false;
+			}
+			if (v < -128 || v > 127)
+			{
+				// Should be a signed byte
+				return false;
+			}
+			next = (last + (int)v) & 0xff;
+		}
+		if (ii == 0 || next == 0) {
+			// no matrix, don't care
+			return true;
+		}
+		needs_zigzag();
+		// TODO: zigzag scan the matrices
+		return false;
+	}
+	return true;
+}
+
+static bool SkipScalingLists(NalUnitBitstreamParser &parser, H264SPS &sps)
+{
+	uint8_t flag = 0;
+	if (!parser.ReadBit(flag))
+		return false;
+
+	if (flag) {
+		for (unsigned ii = 0; ii < 6; ++ii) {
+			if (!SkipScalingList(parser, sps, 16))
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 bool H264Parser::ParseSPS(const uint8_t *nalu, size_t length, H264SPS &sps)
 {
     NalUnitBitstreamParser parser(nalu, length);
@@ -198,8 +264,9 @@ bool H264Parser::ParseSPS(const uint8_t *nalu, size_t length, H264SPS &sps)
 
 				if(scaling_list_present_flag)
 				{
-					// TODO: add support for scaling list
-					return false;
+					if (!SkipScalingLists(parser, sps)) {
+						return false;
+					}
 				}
 			}
 		}
