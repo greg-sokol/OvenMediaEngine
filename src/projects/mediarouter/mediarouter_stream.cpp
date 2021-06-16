@@ -150,8 +150,19 @@ bool MediaRouteStream::ProcessH264AVCCStream(std::shared_ptr<MediaTrack> &media_
 				return false;
 			}
 
-			media_track->SetWidth(sps.GetWidth());
-			media_track->SetHeight(sps.GetHeight());
+			if (!sps.HasScalingMatrix())
+			{
+				media_track->SetWidth(sps.GetWidth());
+				media_track->SetHeight(sps.GetHeight());
+			}
+
+			if (media_track->GetWidth() == 0 || media_track->GetHeight() == 0) {
+				if (sps.HasScalingMatrix()) {
+					logtw("Scaling matrix present: width %d, height %d may be incorrect", sps.GetWidth(), sps.GetHeight());
+				}
+				media_track->SetWidth(sps.GetWidth());
+				media_track->SetHeight(sps.GetHeight());
+			}
 		}
 
 		media_track->SetCodecExtradata(media_packet->GetData());
@@ -349,8 +360,11 @@ bool MediaRouteStream::ProcessH264AnnexBStream(std::shared_ptr<MediaTrack> &medi
 					return false;
 				}
 
-				media_track->SetWidth(sps.GetWidth());
-				media_track->SetHeight(sps.GetHeight());
+				if (media_track->GetWidth() == 0 || media_track->GetHeight() == 0)
+				{
+				  media_track->SetWidth(sps.GetWidth());
+				  media_track->SetHeight(sps.GetHeight());
+				}
 
 				logtd("%s", sps.GetInfoString().CStr());
 
@@ -971,7 +985,7 @@ std::shared_ptr<MediaPacket> MediaRouteStream::Pop()
 	//	- 1) If the current packet does not have a Duration value then stashed.
 	//	- 1) If packets stashed, calculate duration compared to the current packet timestamp.
 	//	- 3) and then, the current packet stash.
-
+	//printf("DTS %lu PTS %lu\n", media_packet->GetDts(), media_packet->GetPts());
 	auto it = _media_packet_stash.find(media_packet->GetTrackId());
 	if (it == _media_packet_stash.end())
 	{

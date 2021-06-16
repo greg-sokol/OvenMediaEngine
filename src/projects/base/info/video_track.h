@@ -39,8 +39,8 @@ public:
 protected:
 	double _framerate;
 	double _video_timescale;
-	int32_t _width;
-	int32_t _height;
+	int32_t _width = 0;
+	int32_t _height = 0;
 	int32_t _format;
 
 	std::shared_ptr<ov::Data> _h264_sps_pps_annexb_data = nullptr;
