@@ -240,18 +240,17 @@ bool H264Parser::ParseSPS(const uint8_t *nalu, size_t length, H264SPS &sps)
 		chroma_bit_depth += 8;
 
 		uint8_t zero_transform_bypass_flag;
-		if(!parser.ReadBit(zero_transform_bypass_flag)) 
+		if(!parser.ReadBit(zero_transform_bypass_flag))
 		{
 			return false;
 		}
 
-		uint8_t scaling_matrix_present_flag;
-		if(!parser.ReadBit(scaling_matrix_present_flag))
+		if(!parser.ReadBit(sps._scaling_matrix_present_flag))
 		{
 			return false;
 		}
 
-		if(scaling_matrix_present_flag)
+		if(sps._scaling_matrix_present_flag)
 		{
 			const size_t matrix_size = chroma_format == 3 ? 12 : 8;
 			for(size_t index = 0; index < matrix_size; ++index)

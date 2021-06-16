@@ -51,6 +51,11 @@ public:
         return _max_nr_of_reference_frames;
     }
 
+    bool HasScalingMatrix() const
+    {
+        return _scaling_matrix_present_flag != 0;
+    }
+
     ov::String GetInfoString()
     {
         ov::String out_str = ov::String::FormatString("\n[H264Sps]\n");
@@ -78,6 +83,7 @@ private:
     unsigned int _max_nr_of_reference_frames = 0;
     uint8_t _aspect_ratio_idc = 0;
     ASPECT_RATIO _aspect_ratio = { 0, 0 };
+    uint8_t _scaling_matrix_present_flag = false;
 
     friend class H264Parser;
 };
