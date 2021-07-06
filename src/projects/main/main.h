@@ -9,6 +9,7 @@
 #pragma once
 
 #include "git_info.h"
+#include "version_nlss.h"
 
 // Version format: [MAJOR].[MINOR].[MICRO]
 // Major changes
@@ -20,4 +21,4 @@
 
 #define OME_STR_INTERNAL(x)             # x
 #define OME_STR(x)                      OME_STR_INTERNAL(x)
-#define OME_VERSION                     OME_STR(OME_VERSION_MAJOR) "." OME_STR(OME_VERSION_MINOR) "." OME_STR(OME_VERSION_MICRO)
+#define OME_VERSION                     OME_STR(OME_VERSION_MAJOR) "." OME_STR(OME_VERSION_MINOR) "." OME_STR(OME_VERSION_MICRO) ".nlss." OME_STR(OME_VERSION_NLSS)
