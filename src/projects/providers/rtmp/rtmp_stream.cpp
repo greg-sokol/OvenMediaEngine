@@ -139,6 +139,10 @@ namespace pvd
 			return true;
 		}
 
+		if (IsTimedOut())
+		{
+			return true;
+		}
 		return false;
 	}
 
@@ -170,7 +174,7 @@ namespace pvd
 		{
 			logte("The packet is ignored because the size is too large: [%d]), packet size: %zu, threshold: %d",
 				GetChannelId(), _remained_data->GetLength(), RTMP_MAX_PACKET_SIZE);
-
+			_remained_data.reset();
 			return false;
 		}
 

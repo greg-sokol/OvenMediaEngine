@@ -115,6 +115,7 @@ namespace pvd
 		auto stream = RtmpStream::Create(StreamSourceType::Rtmp, channel_id, remote, GetSharedPtrAs<pvd::PushProvider>());
 
 		logti("A RTMP client has connected from %s", remote->ToString().CStr());
+		SetChannelTimeout(stream, 5);
 
 		PushProvider::OnChannelCreated(remote->GetNativeHandle(), stream);
 	}
