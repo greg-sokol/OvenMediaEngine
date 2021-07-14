@@ -1,3 +1,3 @@
 #pragma once
 
-#define OME_VERSION_NLSS 5
+#define OME_VERSION_NLSS 6
