@@ -201,12 +201,14 @@ namespace pvd
 					_remained_data->GetLength(),
 					process_size);
 				
+				_remained_data->GetWritableData();
 				return process_size;
 			}
 			else if(process_size == 0)
 			{
 				// Need more data
 				// logtd("Not enough data");
+				_remained_data->GetWritableData();
 				break;
 			}
 
@@ -1182,7 +1184,8 @@ namespace pvd
 											  cmn::BitstreamFormat::H264_AVCC, // RTMP's packet type is AVCC 
 											 packet_type);
 
-			SendFrame(video_frame);
+			if (!SendFrame(video_frame))
+				return false;
 
 			// Statistics for debugging
 			if (flv_video.FrameType() == FlvVideoFrameTypes::KEY_FRAME)
@@ -1281,6 +1284,7 @@ namespace pvd
 			}
 		}
 
+		bool res = true;
 		// audio stream callback 
 		if (_media_info->audio_stream_coming)
 		{
@@ -1333,13 +1337,13 @@ namespace pvd
 											  cmn::BitstreamFormat::AAC_RAW,
 											  packet_type);
 
-			SendFrame(frame);											
+			res = SendFrame(frame);
 
 			_last_audio_timestamp = message->header->completed.timestamp;
 			_audio_frame_count++;
 		}
 
-		return true;
+		return res;
 	}
 
 	bool RtmpStream::PublishStream()
