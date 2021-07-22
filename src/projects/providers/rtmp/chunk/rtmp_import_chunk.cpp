@@ -103,6 +103,13 @@ int RtmpImportChunk::Import(const std::shared_ptr<const ov::Data> &data, bool *i
 		last_chunk_header = item->second;
 	}
 
+	if (last_chunk_header->payload_size == 0)
+	{
+		*is_completed = true;
+		_parser.Reset();
+		return parsed_bytes;
+	}
+
 	if (stream.IsRemained(last_chunk_header->expected_payload_size) == false)
 	{
 		// Need more data
