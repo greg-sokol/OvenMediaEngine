@@ -25,7 +25,7 @@
 #define DEFAULT_RELAY_USERNAME	"ome"
 #define DEFAULT_RELAY_KEY		"airen"
 #define DEFAULT_LIFETIME		3600
-// This is the player's candidate and eventually passed to OME. 
+// This is the player's candidate and eventually passed to OME.
 // However, OME does not use the player's candidate. So we pass anything by this value.
 #define FAKE_RELAY_IP			"1.1.1.1"
 #define FAKE_RELAY_PORT			14090
@@ -46,7 +46,7 @@ protected:
 
 		IcePacketIdentifier::PacketType packet_type;
 		GateType	input_method = GateType::DIRECT;
-		// If this packet cames from a send 
+		// If this packet cames from a send
 		ov::SocketAddress peer_address;
 		// If this packet is from a turn data channel, store the channel number.
 		uint16_t channel_number = 0;
@@ -68,6 +68,7 @@ protected:
 
 		std::shared_ptr<const SessionDescription> offer_sdp;
 		std::shared_ptr<const SessionDescription> peer_sdp;
+		std::shared_ptr<std::vector<RtcIceCandidate>> local_candidates;
 
 		std::shared_ptr<ov::Socket> remote;
 		ov::SocketAddress address;
@@ -107,7 +108,7 @@ protected:
 	protected:
 		const int _expire_after_ms;
 		const uint64_t _lifetime_epoch_ms;
-		
+
 	};
 
 	struct BindingRequestInfo
@@ -156,10 +157,11 @@ public:
 
 	ov::String GenerateUfrag();
 
-	void AddSession(const std::shared_ptr<IcePortObserver> &observer, uint32_t session_id, 
-					std::shared_ptr<const SessionDescription> offer_sdp, std::shared_ptr<const SessionDescription> peer_sdp, 
+	void AddSession(const std::shared_ptr<IcePortObserver> &observer, uint32_t session_id,
+					std::shared_ptr<const SessionDescription> offer_sdp, std::shared_ptr<const SessionDescription> peer_sdp, const std::shared_ptr<std::vector<RtcIceCandidate>>& local_candidates,
 					int stun_timeout_ms,  uint64_t life_time_epoch_ms, std::any user_data);
 	bool RemoveSession(uint32_t session_id);
+	void AddIceCandidate(std::shared_ptr<const SessionDescription> offer_sdp, std::shared_ptr<const SessionDescription> peer_sdp, const IceCandidate& peer_candidate);
 
 	bool Send(uint32_t session_id, std::shared_ptr<RtpPacket> packet);
 	bool Send(uint32_t session_id, std::shared_ptr<RtcpPacket> packet);
@@ -185,13 +187,13 @@ protected:
 private:
 	void CheckTimedoutItem();
 
-	void OnPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address, 
+	void OnPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address,
 						GateInfo &packet_info, const std::shared_ptr<const ov::Data> &data);
-	void OnStunPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address, 
+	void OnStunPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address,
 						GateInfo &packet_info, const std::shared_ptr<const ov::Data> &data);
-	void OnChannelDataPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address, 
+	void OnChannelDataPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address,
 						GateInfo &packet_info, const std::shared_ptr<const ov::Data> &data);
-	void OnApplicationPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address, 
+	void OnApplicationPacketReceived(const std::shared_ptr<ov::Socket> &remote, const ov::SocketAddress &address,
 						GateInfo &packet_info, const std::shared_ptr<const ov::Data> &data);
 
 
@@ -236,7 +238,7 @@ private:
 	// value: IcePortInfo
 	std::mutex _user_port_table_lock;
 	std::map<const ov::String, std::shared_ptr<IcePortInfo>> _user_port_table;
-	
+
 	// Find IcePortInfo with peer's ip:port
 	// key: SocketAddress value: IcePortInfo
 	std::mutex _port_table_lock;
@@ -249,7 +251,7 @@ private:
 	// Request Transaction ID : Info
 	std::shared_mutex _binding_request_table_lock;
 	std::map<ov::String, BindingRequestInfo> _binding_request_table;
-	
+
 
 	// Demultiplexer for data input through TCP
 	// remote's ID : Demultiplexer

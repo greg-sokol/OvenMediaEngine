@@ -36,7 +36,7 @@ bool RtcSignallingServer::Start(const ov::SocketAddress *address, const ov::Sock
 	}
 
 	if(interceptor == nullptr)
-	{	
+	{
 		OV_ASSERT(false, "Interceptor must not be nullptr");
 		return false;
 	}
@@ -76,7 +76,7 @@ bool RtcSignallingServer::Start(const ov::SocketAddress *address, const ov::Sock
 			auto address_items = tcp_relay_address.Split(":");
 			if(address_items.size() != 2)
 			{
-				
+
 			}
 
 			if(address_items[0] == "*")
@@ -145,7 +145,7 @@ bool RtcSignallingServer::Start(const ov::SocketAddress *address, const ov::Sock
 				_ice_servers.append(ice_server);
 			}
 		}
-		
+
 		if(_ice_servers.size() == 0)
 		{
 			_ice_servers = Json::nullValue;
@@ -326,7 +326,7 @@ bool RtcSignallingServer::SetWebSocketHandler(std::shared_ptr<http::svr::ws::Int
 				// The client is disconnected before websocket negotiation
 			}
 		});
-	
+
 	return true;
 }
 
@@ -602,7 +602,7 @@ std::shared_ptr<ov::Error> RtcSignallingServer::DispatchRequestOffer(const std::
 				}
 				value["candidates"] = candidates;
 				value["code"] = static_cast<int>(http::StatusCode::OK);
-				if (tcp_relay == true && _ice_servers.isNull() == false)
+				if (_ice_servers.isNull() == false)
 				{
 					value["ice_servers"] = _ice_servers;
 				}
@@ -691,9 +691,9 @@ std::shared_ptr<ov::Error> RtcSignallingServer::DispatchAnswer(const std::shared
 			for (auto &observer : _observers)
 			{
 				logtd("Trying to callback OnAddRemoteDescription to %p (%s / %s)...", observer.get(), info->vhost_app_name.CStr(), info->stream_name.CStr());
-				
+
 				// TODO : Improved to return detailed error cause
-				if(observer->OnAddRemoteDescription(ws_client, info->vhost_app_name, info->host_name, info->stream_name, info->offer_sdp, info->peer_sdp) == false)
+				if(observer->OnAddRemoteDescription(ws_client, info->vhost_app_name, info->host_name, info->stream_name, info->offer_sdp, std::make_shared<std::vector<RtcIceCandidate>>(info->local_candidates), info->peer_sdp) == false)
 				{
 					return http::HttpError::CreateError(http::StatusCode::Forbidden, "Forbidden");
 				}
@@ -738,6 +738,7 @@ std::shared_ptr<ov::Error> RtcSignallingServer::DispatchAnswer(const std::shared
 
 std::shared_ptr<ov::Error> RtcSignallingServer::DispatchCandidate(const std::shared_ptr<http::svr::ws::Client> &ws_client, const ov::JsonObject &object, std::shared_ptr<RtcSignallingInfo> &info)
 {
+
 	const Json::Value &candidates_value = object.GetJsonValue("candidates");
 
 	if (candidates_value.isNull())
@@ -755,6 +756,7 @@ std::shared_ptr<ov::Error> RtcSignallingServer::DispatchCandidate(const std::sha
 
 	if (peer_info == nullptr)
 	{
+
 		logtd("[Host -> OME] The host peer sents candidates: %s", object.ToString().CStr());
 
 		for (const auto &candidate_iterator : candidates_value)
@@ -781,7 +783,8 @@ std::shared_ptr<ov::Error> RtcSignallingServer::DispatchCandidate(const std::sha
 
 			for (auto &observer : _observers)
 			{
-				observer->OnIceCandidate(ws_client, info->vhost_app_name, info->host_name, info->stream_name, ice_candidate, username_fragment);
+				observer->OnIceCandidate(ws_client, info->vhost_app_name, info->host_name, info->stream_name, ice_candidate, username_fragment,
+						info->offer_sdp, info->peer_sdp);
 			}
 		}
 	}
