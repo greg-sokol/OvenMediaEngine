@@ -24,6 +24,80 @@
 #include <base/info/stream.h>
 #include <base/info/application.h>
 
+class StunThread {
+public:
+	StunThread() {
+		std::thread thr(&StunThread::run, this);
+		thr.detach();
+	}
+	void addPort(const std::shared_ptr<PhysicalPort>& port);
+	void startBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote, const ov::String& local_ufrag, const ov::String& remote_ufrag, const ov::String& icePwd);
+	void stopBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote);
+
+private:
+	std::condition_variable cond;
+	std::mutex mutex;
+	std::map<std::pair<ov::SocketAddress, ov::SocketAddress>, std::tuple<std::string, std::string, std::string>> bindingMap;
+	std::map<ov::SocketAddress, std::shared_ptr<PhysicalPort>> portMap;
+
+	void run();
+	void bind(const ov::SocketAddress& local, const ov::SocketAddress& remote, const std::string& local_ufrag, const std::string& remote_ufrag, const std::string& icePwd);
+};
+
+void StunThread::run()
+{
+	std::unique_lock<std::mutex> lock(mutex);
+
+	while (1) {
+		if (bindingMap.empty()) {
+			cond.wait(lock);
+			continue;
+		}
+		for (auto it = bindingMap.begin(); it != bindingMap.end(); ++it) {
+			auto addrPair = it->first;
+			auto authTuple = it->second;
+
+			bind(addrPair.first, addrPair.second, std::get<0>(authTuple), std::get<1>(authTuple), std::get<2>(authTuple));
+		}
+		cond.wait_for(lock, std::chrono::milliseconds(1000));
+	}
+
+}
+
+void StunThread::addPort(const std::shared_ptr<PhysicalPort>& port)
+{
+	std::unique_lock<std::mutex> lock(mutex);
+	portMap[port->GetAddress()] = port;
+}
+
+void StunThread::startBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote, const ov::String& local_ufrag, const ov::String& remote_ufrag, const ov::String& icePwd)
+{
+	std::unique_lock<std::mutex> lock(mutex);
+	bindingMap.insert(std::make_pair(std::make_pair(local, remote), std::make_tuple(std::string(local_ufrag.CStr()), std::string(remote_ufrag.CStr()), std::string(icePwd.CStr()))));
+	if (bindingMap.size() == 1)
+		cond.notify_all();
+}
+void StunThread::stopBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote)
+{
+	std::unique_lock<std::mutex> lock(mutex);
+	bindingMap.erase(std::make_pair(local, remote));
+}
+
+void StunThread::bind(const ov::SocketAddress& local, const ov::SocketAddress& remote, const std::string& local_ufrag, const std::string& remote_ufrag, const std::string& icePwd)
+{
+	auto it = portMap.find(local);
+	if (it == portMap.end())
+		return;
+
+	auto physPort = it->second;
+
+	auto sock = physPort->GetSocket();
+
+	sock->SendTo(remote, "abc", 3); // TODO: Send STUN binding
+}
+
+StunThread stunThread;
+
 IcePort::IcePort()
 {
 	_timer.Push(
@@ -277,6 +351,7 @@ void IcePort::AddIceCandidate(std::shared_ptr<const SessionDescription> offer_sd
 		}
 
 		local_candidates = item->second->local_candidates;
+		//for ()
 	}
 
 	if (local_candidates->empty()) {
