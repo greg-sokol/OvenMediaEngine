@@ -77,6 +77,7 @@ void StunThread::startBinding(const ov::SocketAddress& local, const ov::SocketAd
 	if (bindingMap.size() == 1)
 		cond.notify_all();
 }
+
 void StunThread::stopBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote)
 {
 	std::unique_lock<std::mutex> lock(mutex);
@@ -85,7 +86,12 @@ void StunThread::stopBinding(const ov::SocketAddress& local, const ov::SocketAdd
 
 void StunThread::bind(const ov::SocketAddress& local, const ov::SocketAddress& remote, const std::string& local_ufrag, const std::string& remote_ufrag, const std::string& icePwd)
 {
-	auto it = portMap.find(local);
+	auto it = portMap.begin();
+	for (; it != portMap.end(); ++it) {
+		if ((it->first.GetIpAddress() == "0.0.0.0" || it->first.GetIpAddress() == local.GetIpAddress()) && it->first.Port() == local.Port())
+			break;
+	}
+
 	if (it == portMap.end())
 		return;
 
@@ -93,10 +99,77 @@ void StunThread::bind(const ov::SocketAddress& local, const ov::SocketAddress& r
 
 	auto sock = physPort->GetSocket();
 
-	sock->SendTo(remote, "abc", 3); // TODO: Send STUN binding
+	StunMessage message;
+
+	message.SetClass(StunClass::Request);
+	message.SetMethod(StunMethod::Binding);
+	// TODO: make transaction_id unique
+	uint8_t transaction_id[OV_STUN_TRANSACTION_ID_LENGTH];
+	uint8_t charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+	// generate transaction id ramdomly
+	for (int index = 0; index < OV_STUN_TRANSACTION_ID_LENGTH; index++)
+	{
+		transaction_id[index] = charset[rand() % (OV_COUNTOF(charset)-1)];
+	}
+	message.SetTransactionId(&(transaction_id[0]));
+
+	std::shared_ptr<StunAttribute> attribute;
+
+	// USERNAME attribute
+	attribute = std::make_shared<StunUserNameAttribute>();
+	auto *user_name_attribute = dynamic_cast<StunUserNameAttribute *>(attribute.get());
+	user_name_attribute->SetText(ov::String::FormatString("%s:%s", remote_ufrag.c_str(), local_ufrag.c_str()));
+	message.AddAttribute(std::move(attribute));
+
+	// ICE-CONTROLLING
+	attribute = std::make_shared<StunUnknownAttribute>(0x802A, 8);
+	auto *tie_break_attribute = dynamic_cast<StunUnknownAttribute *>(attribute.get());
+
+	/*
+	https://datatracker.ietf.org/doc/html/rfc5245#section-7.2.1.1
+	If the agent's tie-breaker is less than the contents of the
+    ICE-CONTROLLING attribute, the agent switches to the controlled role.
+	*/
+	uint8_t tie_break_value[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
+	tie_break_attribute->SetData(&(tie_break_value[0]), 8);
+	message.AddAttribute(std::move(attribute));
+
+	// USE-CANDIDATE (for testing hash)
+	StunUnknownAttribute *unknown_attribute = nullptr;
+	attribute = std::make_shared<StunUnknownAttribute>(0x0025, 0);
+	unknown_attribute = dynamic_cast<StunUnknownAttribute *>(attribute.get());
+	message.AddAttribute(std::move(attribute));
+
+	// PRIORITY (for testing hash)
+	attribute = std::make_shared<StunUnknownAttribute>(0x0024, 4);
+	unknown_attribute = dynamic_cast<StunUnknownAttribute *>(attribute.get());
+	uint8_t unknown_data3[] = {0x6E, 0x7F, 0x1E, 0xFF};
+	unknown_attribute->SetData(&(unknown_data3[0]), 4);
+	message.AddAttribute(std::move(attribute));
+
+	std::shared_ptr<const ov::Data> send_data;
+
+	if(icePwd.empty())
+	{
+		send_data = message.Serialize();
+	}
+	else
+	{
+		send_data = message.Serialize(ov::String(icePwd.c_str()));
+	}
+
+	if(send_data == nullptr)
+	{
+		return;
+	}
+
+	auto sent_bytes = sock->SendTo(remote, send_data);
+
+	printf("Sent STUN binding to %s, %d bytes sent\n", remote.ToString().CStr(), sent_bytes);
 }
 
-StunThread stunThread;
+static StunThread stunThread;
 
 IcePort::IcePort()
 {
@@ -159,6 +232,9 @@ bool IcePort::CreateIceCandidates(const std::vector<std::vector<RtcIceCandidate>
 
 			logti("ICE port is bound to %s/%s (%p)", address.ToString().CStr(), transport.CStr(), physical_port.get());
 			_physical_port_list.push_back(physical_port);
+			if (transport == "UDP") {
+				stunThread.addPort(physical_port);
+			}
 		}
 	}
 
@@ -338,10 +414,15 @@ void IcePort::AddSession(const std::shared_ptr<IcePortObserver> &observer, uint3
 
 void IcePort::AddIceCandidate(std::shared_ptr<const SessionDescription> offer_sdp, std::shared_ptr<const SessionDescription> peer_sdp, const IceCandidate& peer_candidate)
 {
+
+	if (peer_candidate.GetIpAddress().HasSuffix(".local"))
+		return;
+
 	const ov::String &local_ufrag = offer_sdp->GetIceUfrag();
 	const ov::String &remote_ufrag = peer_sdp->GetIceUfrag();
+	const ov::String &icePwd = peer_sdp->GetIcePwd();
 
-	std::shared_ptr<std::vector<RtcIceCandidate>> local_candidates;
+	std::vector<RtcIceCandidate> local_candidates;
 	{
 		std::lock_guard<std::mutex> lock_guard(_user_port_table_lock);
 
@@ -350,12 +431,25 @@ void IcePort::AddIceCandidate(std::shared_ptr<const SessionDescription> offer_sd
 			return;
 		}
 
-		local_candidates = item->second->local_candidates;
-		//for ()
+		local_candidates = *item->second->local_candidates;
 	}
 
-	if (local_candidates->empty()) {
+	if (local_candidates.empty()) {
 		return;
+	}
+
+	ov::SocketAddress peerAddress = peer_candidate.GetAddress();
+
+	for (unsigned ii = 0; ii < local_candidates.size(); ++ii) {
+		if (local_candidates[ii].GetTransport().LowerCaseString() != "udp")
+			continue;
+
+		if (local_candidates[ii].GetCandidateTypes().LowerCaseString() != "host")
+			continue;
+
+		ov::SocketAddress localAddress = local_candidates[ii].GetAddress();
+
+		stunThread.startBinding(localAddress, peerAddress, local_ufrag, remote_ufrag, icePwd);
 	}
 
 }
