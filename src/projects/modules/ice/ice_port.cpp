@@ -1043,8 +1043,29 @@ bool IcePort::ProcessStunBindingResponse(const std::shared_ptr<ov::Socket> &remo
 		auto item = _binding_request_table.find(transaction_id_key);
 		if(item == _binding_request_table.end())
 		{
-			logtw("Could not find binding request info : transaction id(%s)", transaction_id_key.CStr());
-			return false;
+			std::shared_ptr<ov::SocketAddress> mapped_address;
+			{
+				std::string id = transaction_id_key.CStr();
+				std::unique_lock<std::mutex> mapping_lock(_stun_mapping_list_mutex);
+
+				auto it = _stun_mapping_list.find(id);
+				if (it != _stun_mapping_list.end()) {
+					printf("FOUND STUN ID\n");
+					auto xor_peer_attribute = message.GetAttribute<StunXorMappedAddressAttribute>(StunAttributeType::XorMappedAddress);
+					if(xor_peer_attribute != nullptr)
+					{
+						mapped_address = std::make_shared<ov::SocketAddress>(xor_peer_attribute->GetAddress());
+						it->second = mapped_address;
+						_stun_mapping_cond.notify_all();
+					}
+				}
+			}
+			if (mapped_address.get() == nullptr) {
+				logtw("Could not find binding request info : transaction id(%s)", transaction_id_key.CStr());
+				return false;
+			} else {
+				return true;
+			}
 		}
 
 		ice_port_info = item->second._ice_port;
@@ -1362,4 +1383,67 @@ void IcePort::SetIceState(std::shared_ptr<IcePortInfo> &info, IcePortConnectionS
 ov::String IcePort::ToString() const
 {
 	return ov::String::FormatString("<IcePort: %p, %zu ports>", this, _physical_port_list.size());
+}
+
+bool IcePort::GetMappedAddress(const IceCandidate& local_candidate, const ov::SocketAddress& stun_server, ov::SocketAddress& mapped_address)
+{
+	std::shared_ptr<ov::Socket> sock;
+	{
+		std::lock_guard<std::recursive_mutex> lock_guard(_physical_port_list_mutex);
+		for (unsigned ii = 0; ii < _physical_port_list.size(); ++ii) {
+			PhysicalPort& port = *(_physical_port_list[ii]);
+			ov::SocketAddress localAddr = port.GetAddress();
+			if ((localAddr.GetIpAddress() == "0.0.0.0" || localAddr.GetIpAddress() == local_candidate.GetIpAddress()) &&
+					localAddr.Port() == local_candidate.GetPort()) {
+				sock = port.GetSocket();
+				break;
+			}
+		}
+	}
+	if (sock.get() == nullptr)
+		return false;
+
+	StunMessage message;
+
+	message.SetClass(StunClass::Request);
+	message.SetMethod(StunMethod::Binding);
+
+	uint8_t transaction_id[OV_STUN_TRANSACTION_ID_LENGTH];
+	uint8_t charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+	// generate transaction id ramdomly
+	for (int index = 0; index < OV_STUN_TRANSACTION_ID_LENGTH; index++)
+	{
+		transaction_id[index] = charset[rand() % OV_COUNTOF(charset)];
+	}
+	message.SetTransactionId(&(transaction_id[0]));
+
+	auto send_data = message.Serialize();
+
+	std::shared_ptr<ov::SocketAddress> tmp_addr;
+	{
+		std::unique_lock<std::mutex> lock(_stun_mapping_list_mutex);
+		sock->SendTo(stun_server, send_data);
+		std::string id;
+		id.assign((char*) transaction_id, OV_STUN_TRANSACTION_ID_LENGTH);
+		_stun_mapping_list.insert(std::make_pair(id, std::shared_ptr<ov::SocketAddress>()));
+		auto toWait = std::chrono::steady_clock::now();
+		toWait += std::chrono::seconds(2);
+		while (std::chrono::steady_clock::now() < toWait) {
+			_stun_mapping_cond.wait_until(lock, toWait);
+			auto it = _stun_mapping_list.find(id);
+			if (it != _stun_mapping_list.end() && it->second.get() != nullptr) {
+				tmp_addr = it->second;
+				break;
+			}
+		}
+		_stun_mapping_list.erase(id);
+	}
+
+	if (tmp_addr.get() == nullptr) {
+		return false;
+	}
+
+	mapped_address = *tmp_addr;
+	return true;
 }

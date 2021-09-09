@@ -139,6 +139,7 @@ public:
 	IcePort();
 	~IcePort() override;
 
+	bool GetMappedAddress(const IceCandidate& local_candidate, const ov::SocketAddress& stun_server, ov::SocketAddress& mapped_address);
 	bool CreateTurnServer(uint16_t listening_port, ov::SocketType socket_type, int tcp_relay_worker_count);
 	bool CreateIceCandidates(const std::vector<std::vector<RtcIceCandidate>> &ice_candidate_list, int ice_worker_count);
 	bool Close();
@@ -231,6 +232,10 @@ private:
 
 	std::vector<std::shared_ptr<PhysicalPort>> _physical_port_list;
 	std::recursive_mutex _physical_port_list_mutex;
+
+	std::map<std::string, std::shared_ptr<ov::SocketAddress>> _stun_mapping_list;
+	std::mutex _stun_mapping_list_mutex;
+	std::condition_variable _stun_mapping_cond;
 
 	// Mapping table containing related information until STUN binding.
 	// Once binding is complete, there is no need because it can be found by destination ip & port.

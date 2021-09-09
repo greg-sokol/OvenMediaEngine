@@ -92,7 +92,7 @@ bool WebRtcPublisher::Start()
 		logte("Could not create ICE Candidates. Check your ICE configuration");
 		result = false;
 	}
-	
+
 	bool tcp_relay_parsed = false;
 	auto tcp_relay = ice_candidates_config.GetTcpRelay(&tcp_relay_parsed);
 	if(tcp_relay_parsed)
@@ -140,7 +140,7 @@ bool WebRtcPublisher::Start()
 
 
 	_timer.Push(
-		[this](void *parameter) -> ov::DelayQueueAction 
+		[this](void *parameter) -> ov::DelayQueueAction
 		{
 			// 2018-12-24 23:06:25.035,RTSP.SS,CONN_COUNT,INFO,,,[Live users], [Playback users]
 			std::shared_ptr<info::Application> rtsp_live_app_info;
@@ -150,8 +150,8 @@ bool WebRtcPublisher::Start()
 
 			rtsp_live_app_metrics = nullptr;
 			rtsp_play_app_metrics = nullptr;
-			
-			// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
+
+			// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications
 			rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
 			if (rtsp_live_app_info != nullptr)
 			{
@@ -234,7 +234,7 @@ bool WebRtcPublisher::DisconnectSessionInternal(const std::shared_ptr<RtcSession
 	rtsp_live_app_metrics = nullptr;
 	rtsp_play_app_metrics = nullptr;
 
-	// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
+	// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications
 	rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
 	if (rtsp_live_app_info != nullptr)
 	{
@@ -266,7 +266,7 @@ void WebRtcPublisher::OnMessage(const std::shared_ptr<ov::CommonMessage> &messag
 	auto code = static_cast<MessageCode>(message->_code);
 	if(code == MessageCode::DISCONNECT_SESSION)
 	{
-		try 
+		try
 		{
 			auto session = std::any_cast<std::shared_ptr<RtcSession>>(message->_message);
 			if(session == nullptr)
@@ -277,7 +277,7 @@ void WebRtcPublisher::OnMessage(const std::shared_ptr<ov::CommonMessage> &messag
 			_ice_port->RemoveSession(session->GetId());
 			DisconnectSessionInternal(session);
 		}
-		catch(const std::bad_any_cast& e) 
+		catch(const std::bad_any_cast& e)
 		{
 			logtc("Wrong message!");
 			return;
@@ -405,6 +405,28 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 		const auto &candidates = _ice_candidate_list[candidate_index_to_send];
 
 		ice_candidates->insert(ice_candidates->end(), candidates.cbegin(), candidates.cend());
+
+		const RtcIceCandidate& query_candidate = candidates[0];
+		ov::SocketAddress reflexive_address;
+		if (_ice_port->GetMappedAddress(query_candidate, ov::SocketAddress("94.23.25.72", 3478), reflexive_address)) {
+			RtcIceCandidate srflx_candidate = query_candidate;
+			srflx_candidate.SetIpAddress(reflexive_address.GetIpAddress());
+			srflx_candidate.SetPort(reflexive_address.Port());
+			srflx_candidate.SetRelAddr(query_candidate.GetIpAddress());
+			srflx_candidate.SetRelPort(query_candidate.GetPort());
+			srflx_candidate.SetCandidateTypes("srflx");
+			srflx_candidate.SetFoundation(std::to_string(ice_candidates->size()).c_str());
+			uint32_t priority = srflx_candidate.GetPriority();
+			priority /= 2;
+			srflx_candidate.SetPriority(priority);
+			//srflx_candidate.SetSdpMLineIndex(ice_candidates->size());
+			ice_candidates->insert(ice_candidates->end(), srflx_candidate);
+		}
+
+	}
+
+	for (unsigned ii = 0 ; ii < ice_candidates->size(); ++ii) {
+		printf("** CANDIDATE - %s\n", (*ice_candidates)[ii].GetCandidateString().CStr());
 	}
 
 	auto session_description = std::make_shared<SessionDescription>(*stream->GetSessionDescription());
@@ -419,6 +441,7 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 											 const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 											 const std::shared_ptr<const SessionDescription> &offer_sdp,
+											 const std::shared_ptr<std::vector<RtcIceCandidate>>& local_candidates,
 											 const std::shared_ptr<const SessionDescription> &peer_sdp)
 {
 	auto application = GetApplicationByName(vhost_app_name);
@@ -496,7 +519,7 @@ bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws
 		}
 
 		auto ice_timeout = application->GetConfig().GetPublishers().GetWebrtcPublisher().GetTimeout();
-		_ice_port->AddSession(IcePortObserver::GetSharedPtr(), session->GetId(), offer_sdp, peer_sdp, ice_timeout, session_life_time, session);
+		_ice_port->AddSession(IcePortObserver::GetSharedPtr(), session->GetId(), offer_sdp, peer_sdp, local_candidates, ice_timeout, session_life_time, session);
 
 		// Session is created
 
@@ -518,7 +541,7 @@ bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws
 		rtsp_live_app_metrics = nullptr;
 		rtsp_play_app_metrics = nullptr;
 
-		// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
+		// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications
 		rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
 		if (rtsp_live_app_info != nullptr)
 		{
@@ -581,8 +604,13 @@ bool WebRtcPublisher::OnStopCommand(const std::shared_ptr<http::svr::ws::Client>
 bool WebRtcPublisher::OnIceCandidate(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 									 const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 									 const std::shared_ptr<RtcIceCandidate> &candidate,
-									 const ov::String &username_fragment)
+									 const ov::String &username_fragment,
+									 const std::shared_ptr<const SessionDescription> &offer_sdp,
+									 const std::shared_ptr<const SessionDescription> &peer_sdp)
 {
+	printf("*** remote candidate - %s\n", candidate->GetCandidateString().CStr());
+	printf("*** remote ufrag - %s\n", username_fragment.CStr());
+	_ice_port->AddIceCandidate(offer_sdp, peer_sdp, *candidate);
 	return true;
 }
 
@@ -593,11 +621,11 @@ bool WebRtcPublisher::OnIceCandidate(const std::shared_ptr<http::svr::ws::Client
 void WebRtcPublisher::OnStateChanged(IcePort &port, uint32_t session_id, IcePortConnectionState state, std::any user_data)
 {
 	logtd("IcePort OnStateChanged : %d", state);
-	
+
 	std::shared_ptr<RtcSession> session;
 	try
 	{
-		session = std::any_cast<std::shared_ptr<RtcSession>>(user_data);	
+		session = std::any_cast<std::shared_ptr<RtcSession>>(user_data);
 	}
 	catch(const std::bad_any_cast& e)
 	{
@@ -605,7 +633,7 @@ void WebRtcPublisher::OnStateChanged(IcePort &port, uint32_t session_id, IcePort
 		logtc("WebRtcPublisher::OnDataReceived - Could not convert user_data, internal error");
 		return;
 	}
-	
+
 	auto application = session->GetApplication();
 	auto stream = std::static_pointer_cast<RtcStream>(session->GetStream());
 
@@ -638,7 +666,7 @@ void WebRtcPublisher::OnDataReceived(IcePort &port,uint32_t session_id, std::sha
 	std::shared_ptr<RtcSession> session;
 	try
 	{
-		session = std::any_cast<std::shared_ptr<RtcSession>>(user_data);	
+		session = std::any_cast<std::shared_ptr<RtcSession>>(user_data);
 	}
 	catch(const std::bad_any_cast& e)
 	{
