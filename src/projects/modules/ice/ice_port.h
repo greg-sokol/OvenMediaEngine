@@ -20,6 +20,7 @@
 #include <modules/rtp_rtcp/rtcp_packet.h>
 #include <modules/physical_port/physical_port_manager.h>
 
+#include "TurnThread.h"
 
 #define DEFAULT_RELAY_REALM		"airensoft"
 #define DEFAULT_RELAY_USERNAME	"ome"
@@ -57,6 +58,7 @@ protected:
 		}
 	};
 
+	typedef std::shared_ptr<TurnThread::IceSession> TurnSession;
 	// A data structure to tracking client connection status
 	struct IcePortInfo
 	{
@@ -72,6 +74,7 @@ protected:
 
 		std::shared_ptr<ov::Socket> remote;
 		ov::SocketAddress address;
+		TurnSession turnSession;
 
 		IcePortConnectionState state;
 

@@ -11,6 +11,7 @@
 #include <base/ovlibrary/ovlibrary.h>
 #include <base/ovsocket/ovsocket.h>
 #include <utility>
+#include "TurnThread.h"
 // ICE candidate 구조:
 // [{"candidate":"candidate:0 1 UDP 50 192.168.0.183 10000 typ host generation 0","sdpMLineIndex":0,"sdpMid":"video"}]
 
@@ -101,6 +102,10 @@ public:
 
 	virtual ov::String ToString() const noexcept;
 
+	void SetTurnSession(const std::shared_ptr<TurnThread::IceSession>& session);
+
+	std::shared_ptr<TurnThread::IceSession> GetTurnSession() const;
+
 protected:
 	IceCandidate();
 
@@ -127,5 +132,7 @@ protected:
 	uint16_t _rel_port;
 
 	std::map<ov::String, ov::String> _extension_attributes;
+
+	std::shared_ptr<TurnThread::IceSession> _turn_session;
 };
 

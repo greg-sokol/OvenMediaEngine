@@ -363,3 +363,13 @@ ov::String IceCandidate::ToString() const noexcept
 {
 	return GetCandidateString();
 }
+
+void IceCandidate::SetTurnSession(const std::shared_ptr<TurnThread::IceSession>& session)
+{
+	_turn_session = session;
+}
+
+std::shared_ptr<TurnThread::IceSession> IceCandidate::GetTurnSession() const
+{
+	return _turn_session;
+}

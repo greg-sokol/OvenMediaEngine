@@ -64,11 +64,14 @@ namespace pvd
 		bool OnAddRemoteDescription(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 									const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 									const std::shared_ptr<const SessionDescription> &offer_sdp,
+									const std::shared_ptr<std::vector<RtcIceCandidate>>& local_candidates,
 									const std::shared_ptr<const SessionDescription> &peer_sdp) override;
 		bool OnIceCandidate(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 							const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 							const std::shared_ptr<RtcIceCandidate> &candidate,
-							const ov::String &username_fragment) override;
+							const ov::String &username_fragment,
+							const std::shared_ptr<const SessionDescription> &offer_sdp,
+							const std::shared_ptr<const SessionDescription> &peer_sdp) override;
 
 		bool OnStopCommand(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 						const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,

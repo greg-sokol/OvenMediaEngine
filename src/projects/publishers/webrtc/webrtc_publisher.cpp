@@ -423,6 +423,22 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 			ice_candidates->insert(ice_candidates->end(), srflx_candidate);
 		}
 
+		TurnThread& turnThread = TurnThread::GetInstance();
+		ov::SocketAddress localAddress(query_candidate.GetIpAddress(), query_candidate.GetPort());
+		auto iceSession = turnThread.createTurnSession(localAddress, ov::SocketAddress("94.23.25.72", 3478), "nlsstest", "nlsspass");
+		if (turnThread.getTurnCandidate(iceSession)) {
+				RtcIceCandidate relayCandidate = query_candidate;
+				relayCandidate.SetIpAddress(iceSession->GetRelayedAddress().GetIpAddress());
+				relayCandidate.SetPort(iceSession->GetRelayedAddress().Port());
+				relayCandidate.SetRelAddr(iceSession->GetReflexiveAddress().GetIpAddress());
+				relayCandidate.SetRelPort(iceSession->GetReflexiveAddress().Port());
+				relayCandidate.SetCandidateTypes("relay");
+				relayCandidate.SetFoundation(std::to_string(ice_candidates->size()).c_str());
+				uint32_t priority = relayCandidate.GetPriority();
+				priority /= 3;
+				relayCandidate.SetPriority(priority);
+				ice_candidates->insert(ice_candidates->end(), relayCandidate);
+		}
 	}
 
 	for (unsigned ii = 0 ; ii < ice_candidates->size(); ++ii) {

@@ -259,6 +259,7 @@ namespace pvd
 	bool WebRTCProvider::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 								const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 								const std::shared_ptr<const SessionDescription> &offer_sdp,
+								const std::shared_ptr<std::vector<RtcIceCandidate>>& local_candidates,
 								const std::shared_ptr<const SessionDescription> &peer_sdp)
 	{
 		logtd("WebRTCProvider::OnAddRemoteDescription");
@@ -325,7 +326,7 @@ namespace pvd
 		}
 		
 		auto ice_timeout = application->GetConfig().GetProviders().GetWebrtcProvider().GetTimeout();
-		_ice_port->AddSession(IcePortObserver::GetSharedPtr(), stream->GetId(), offer_sdp, peer_sdp, ice_timeout, life_time, stream);
+		_ice_port->AddSession(IcePortObserver::GetSharedPtr(), stream->GetId(), offer_sdp, peer_sdp, local_candidates, ice_timeout, life_time, stream);
 
 		if(OnChannelCreated(channel_id, stream) == false)
 		{
@@ -344,7 +345,9 @@ namespace pvd
 	bool WebRTCProvider::OnIceCandidate(const std::shared_ptr<http::svr::ws::Client> &ws_client,
 						const info::VHostAppName &vhost_app_name, const ov::String &host_name, const ov::String &stream_name,
 						const std::shared_ptr<RtcIceCandidate> &candidate,
-						const ov::String &username_fragment)
+						const ov::String &username_fragment,
+						const std::shared_ptr<const SessionDescription> &offer_sdp,
+						const std::shared_ptr<const SessionDescription> &peer_sdp)
 	{
 		return true;
 	}

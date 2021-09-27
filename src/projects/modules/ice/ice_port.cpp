@@ -33,6 +33,7 @@ public:
 	void addPort(const std::shared_ptr<PhysicalPort>& port);
 	void startBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote, const ov::String& local_ufrag, const ov::String& remote_ufrag, const ov::String& icePwd);
 	void stopBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote);
+	void stopBinding(const std::string& local_ufrag);
 
 private:
 	std::condition_variable cond;
@@ -82,6 +83,18 @@ void StunThread::stopBinding(const ov::SocketAddress& local, const ov::SocketAdd
 {
 	std::unique_lock<std::mutex> lock(mutex);
 	bindingMap.erase(std::make_pair(local, remote));
+}
+
+void StunThread::stopBinding(const std::string& local_ufrag)
+{
+	std::unique_lock<std::mutex> lock(mutex);
+	for (auto it = bindingMap.begin(); it != bindingMap.end(); ++it) {
+		auto authTuple = it->second;
+		if (std::get<0>(authTuple) == local_ufrag) {
+			bindingMap.erase(it);
+			break;
+		}
+	}
 }
 
 void StunThread::bind(const ov::SocketAddress& local, const ov::SocketAddress& remote, const std::string& local_ufrag, const std::string& remote_ufrag, const std::string& icePwd)
@@ -234,6 +247,7 @@ bool IcePort::CreateIceCandidates(const std::vector<std::vector<RtcIceCandidate>
 			_physical_port_list.push_back(physical_port);
 			if (transport == "UDP") {
 				stunThread.addPort(physical_port);
+				TurnThread::GetInstance().addPort(physical_port);
 			}
 		}
 	}
@@ -484,8 +498,11 @@ bool IcePort::RemoveSession(uint32_t session_id)
 					auto ice_port_info = it->second;
 					if (ice_port_info->session_id == session_id)
 					{
+						stunThread.stopBinding(std::string(it->second->offer_sdp->GetIceUfrag().CStr()));
 						_user_port_table.erase(it++);
 						logtd("This is because the stun request was not received from this session.");
+
+
 
 						// Close only TCP (TURN)
 						auto remote = ice_port_info->remote;
@@ -514,6 +531,8 @@ bool IcePort::RemoveSession(uint32_t session_id)
 
 		_session_port_table.erase(item);
 		_address_port_table.erase(ice_port_info->address);
+
+		stunThread.stopBinding(std::string(item->second->offer_sdp->GetIceUfrag().CStr()));
 
 		// Close only TCP (TURN)
 		auto remote = ice_port_info->remote;
@@ -586,6 +605,8 @@ void IcePort::CheckTimedoutItem()
 	for (auto &deleted_ice_port : delete_list)
 	{
 		logtw("Client %s(session id: %d) has expired", deleted_ice_port->address.ToString().CStr(), deleted_ice_port->session_id);
+
+		stunThread.stopBinding(deleted_ice_port->address, deleted_ice_port->peer_address);
 
 		// Close only TCP (TURN)
 		if(deleted_ice_port->remote != nullptr && deleted_ice_port->remote->GetSocket().GetType() == ov::SocketType::Tcp)
@@ -824,6 +845,10 @@ void IcePort::OnStunPacketReceived(const std::shared_ptr<ov::Socket> &remote, co
 			if(message.GetClass() == StunClass::Request)
 			{
 				ProcessTurnAllocateRequest(remote, address, gate_info, message);
+			} else if (message.GetClass() == StunClass::ErrorResponse) {
+				TurnThread::GetInstance().onTurnAllocateError(message);
+			} else if (message.GetClass() == StunClass::SuccessResponse) {
+				TurnThread::GetInstance().onTurnAllocateSuccess(message);
 			}
 			break;
 		case StunMethod::Refresh:
@@ -1060,7 +1085,7 @@ bool IcePort::ProcessStunBindingResponse(const std::shared_ptr<ov::Socket> &remo
 					}
 				}
 			}
-			if (mapped_address.get() == nullptr) {
+			if (mapped_address.get() == nullptr && !TurnThread::GetInstance().onStunBinding(message)) {
 				logtw("Could not find binding request info : transaction id(%s)", transaction_id_key.CStr());
 				return false;
 			} else {
