@@ -233,14 +233,17 @@ bool TurnThread::onTurnAllocateSuccess(const StunMessage& msg)
       return false;
     }
     session = it->second;
-    iceTransactions.erase(it);
+
 
     if (session->state != IceSession::STATE_ALLOCATING)
       return false;
 
     auto lifetime_attribute = msg.GetAttribute<StunLifetimeAttribute>(StunAttributeType::Lifetime);
     if (lifetime_attribute != nullptr) {
-      addLifetime(transactionStr, lifetime_attribute->GetValue());
+      addLifetime(session, lifetime_attribute->GetValue());
+    } else {
+      iceTransactions.erase(it);
+      return false;
     }
   }
 
@@ -344,7 +347,7 @@ void TurnThread::sendAuthAllocate(const std::shared_ptr<IceSession>& session)
   message.AddAttribute(std::move(user_name_attribute));
 
   auto lifetime_attribute = std::make_shared<StunLifetimeAttribute>();
-  lifetime_attribute->SetValue(3000);
+  lifetime_attribute->SetValue(900);
 
   message.AddAttribute(std::move(lifetime_attribute));
 
@@ -366,16 +369,79 @@ void TurnThread::addTimeout(const std::string& transaction, unsigned seconds)
   iceTimeouts.insert(std::make_pair(timeout, transaction));
 }
 
-void TurnThread::addLifetime(const std::string& transaction, unsigned seconds)
+void TurnThread::addLifetime(const std::shared_ptr<IceSession>& session, unsigned seconds)
 {
   auto lifetime = std::chrono::steady_clock::now() + std::chrono::seconds(seconds) - std::chrono::seconds(5);
   if (iceLifetimes.empty() || iceLifetimes.begin()->first > lifetime) {
     cond.notify_one();
   }
-  iceLifetimes.insert(std::make_pair(lifetime, transaction));
+  iceLifetimes.insert(std::make_pair(lifetime, session));
 }
 
 void TurnThread::run()
 {
 
+}
+
+bool TurnThread::setTurnPermission(const std::shared_ptr<IceSession>& session, const ov::SocketAddress& remoteCandidate)
+{
+  ov::SocketAddress theRemote = remoteCandidate;
+
+  if (remoteCandidate.GetFamily() == ov::SocketFamily::Inet6) {
+    const sockaddr_in6 * tmpAddr = remoteCandidate.AddressForIPv6();
+    const char* tmpBytes = (const char*) tmpAddr;
+    tmpBytes += 12;
+    struct in_addr v4Addr = { *(const in_addr_t *)tmpBytes };
+    struct sockaddr_in v4InAddr = {AF_INET, tmpAddr->sin6_port, v4Addr};
+    theRemote = ov::SocketAddress(v4InAddr);
+  }
+
+
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (session->state != IceSession::STATE_ALLOCATED)
+      return false;
+
+    IceSession::Peer peer;
+    peer.remoteCandidate = theRemote;
+    peer.state = IceSession::Peer::PEER_REQUESTING_PERMISSION;
+  }
+
+  uint8_t transaction_id[OV_STUN_TRANSACTION_ID_LENGTH];
+
+  for (int index = 0; index < OV_STUN_TRANSACTION_ID_LENGTH; index++)
+  {
+    transaction_id[index] = charset[rand() % OV_COUNTOF(charset)];
+  }
+
+  std::string transactionStr;
+  transactionStr.assign((const char *)transaction_id, OV_STUN_TRANSACTION_ID_LENGTH);
+
+  {
+      std::unique_lock<std::mutex> lock(mutex);
+      iceTransactions.insert(std::make_pair(transactionStr, session));
+      addTimeout(transactionStr, 2);
+  }
+  StunMessage message;
+
+  message.SetClass(StunClass::Request);
+  message.SetMethod(StunMethod::CreatePermission);
+
+  message.SetTransactionId(&(transaction_id[0]));
+
+  auto xor_peer_attribute = std::make_shared<StunXorPeerAddressAttribute>();
+  xor_peer_attribute->SetParameters(theRemote);
+
+  message.AddAttribute(std::move(xor_peer_attribute));
+
+  auto hmac_key = ov::MessageDigest::ComputeDigest(ov::CryptoAlgorithm::Md5,
+		ov::String::FormatString("%s:%s:%s", session->user.c_str(),
+    session->realm.c_str(), session->password.c_str()).ToData(false))->ToString();
+
+
+  auto send_data = message.Serialize(hmac_key);
+  auto sock = session->localPort->GetSocket();
+  sock->SendTo(session->turnAddress, send_data);
+
+  return true;
 }

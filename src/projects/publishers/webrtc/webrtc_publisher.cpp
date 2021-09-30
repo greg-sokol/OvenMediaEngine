@@ -437,8 +437,10 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 				uint32_t priority = relayCandidate.GetPriority();
 				priority /= 3;
 				relayCandidate.SetPriority(priority);
+				relayCandidate.SetTurnSession(iceSession);
 				ice_candidates->insert(ice_candidates->end(), relayCandidate);
 		}
+
 	}
 
 	for (unsigned ii = 0 ; ii < ice_candidates->size(); ++ii) {

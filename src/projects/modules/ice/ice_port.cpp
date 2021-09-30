@@ -73,8 +73,19 @@ void StunThread::addPort(const std::shared_ptr<PhysicalPort>& port)
 
 void StunThread::startBinding(const ov::SocketAddress& local, const ov::SocketAddress& remote, const ov::String& local_ufrag, const ov::String& remote_ufrag, const ov::String& icePwd)
 {
+	if (!local.IsValid() || !remote.IsValid())
+		return;
+	ov::SocketAddress theRemote = remote;
+	if (remote.GetFamily() == ov::SocketFamily::Inet6) {
+    const sockaddr_in6 * tmpAddr = remote.AddressForIPv6();
+    const char* tmpBytes = (const char*) tmpAddr;
+    tmpBytes += 12;
+    struct in_addr v4Addr = { *(const in_addr_t *)tmpBytes };
+    struct sockaddr_in v4InAddr = {AF_INET, tmpAddr->sin6_port, v4Addr};
+    theRemote = ov::SocketAddress(v4InAddr);
+  }
 	std::unique_lock<std::mutex> lock(mutex);
-	bindingMap.insert(std::make_pair(std::make_pair(local, remote), std::make_tuple(std::string(local_ufrag.CStr()), std::string(remote_ufrag.CStr()), std::string(icePwd.CStr()))));
+	bindingMap.insert(std::make_pair(std::make_pair(local, theRemote), std::make_tuple(std::string(local_ufrag.CStr()), std::string(remote_ufrag.CStr()), std::string(icePwd.CStr()))));
 	if (bindingMap.size() == 1)
 		cond.notify_all();
 }
@@ -464,6 +475,24 @@ void IcePort::AddIceCandidate(std::shared_ptr<const SessionDescription> offer_sd
 		ov::SocketAddress localAddress = local_candidates[ii].GetAddress();
 
 		stunThread.startBinding(localAddress, peerAddress, local_ufrag, remote_ufrag, icePwd);
+	}
+
+	const ov::String peerCandidateType = peer_candidate.GetCandidateTypes().LowerCaseString();
+
+	if (peerCandidateType != "host" && peerCandidateType != "srflx")
+		return;
+
+	for (unsigned ii = 0; ii < local_candidates.size(); ++ii) {
+
+		if (local_candidates[ii].GetTransport().LowerCaseString() != "udp")
+			continue;
+
+		const ov::String candidateType = local_candidates[ii].GetCandidateTypes().LowerCaseString();
+
+		if (candidateType != "relay")
+			continue;
+
+		TurnThread::GetInstance().setTurnPermission(local_candidates[ii].GetTurnSession(), peerAddress);
 	}
 
 }
